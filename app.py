@@ -1,16 +1,12 @@
 ###############################################################################################
 # This script creates a Flask app that provides web routes to API information
 # generated from the analysis of Hawaii's sqlite weather database in the sql_alchemy.ipynb file
-# i could not figure out the station return for some reason the same
-# dictionary formatting as others did not work for jsonified response
-# additionally i could not figure out the date formatting...
 ###############################################################################################
 
 ###### GETTING STARTED #################
 
 # importing flask and dependencies
 import numpy as np
-
 import sqlalchemy
 from sqlalchemy.ext.automap import automap_base
 from sqlalchemy.orm import Session
@@ -19,7 +15,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import datetime as dt
-
+from datetime import timedelta
+from itertools import chain
 from flask import Flask, jsonify
 
 # creating the app
@@ -62,11 +59,12 @@ def home():
         f"/api/v1.0/precipitation<br/><br/>"
         f"For station info:<br/>"
         f"/api/v1.0/stations<br/><br/>"
-        f"For temperature info:<br/>"
+        f"For temperature info a year back from last date recorded:<br/>"
         f"/api/v1.0/tobs<br/><br/>"
         f"Type in a start date within range in format YYYY-MM-DD to see min, max, and avg temps from that date forward(without single quotes)<br/>"
-        f"/api/v1.0/'YYY-MM-DD'<br/><br/>"
-        f"type start and end date similarly in place of 'yourstart' and 'yourend' to see the aforementioned stats within that range.<br/>"
+        f"Your correctly formatted date will replace 'yourstart' in the following url<br/>"
+        f"/api/v1.0/yourstart<br/><br/>"
+        f"Type start and end date similarly in place of 'yourstart' and 'yourend' to see the aforementioned stats within that range.<br/>"
         f"/api/v1.0/yourstart/yourend"
     )
 
@@ -79,9 +77,21 @@ def prcp():
     # Create our session (link) from Python to the DB
     session = Session(engine)
     
+    # getting latest date
+    # ordering dates by descending, selecting the first
+    last_date_recorded = session.query(Measurement.date).order_by(Measurement.date.desc()).first()
+    
+    # value stays the same; changing variable from query result to a string
+    # to split it in the next step
+    last_date_recorded = last_date_recorded[0]
+
+    # getting year, month, and day of last day recorded in the correct format
+    # for the datetime object
+    year, month, day = map(int, last_date_recorded.split("-"))
+    
     # query to get precipitation data
     # getting one year from the last date recorded
-    year_from_last_date = dt.datetime(2017, 8, 23) - dt.timedelta(days = 365)
+    year_from_last_date = dt.datetime(year, month, day) - dt.timedelta(days = 365)
 
     # query for date and precipitation data for all days on and after 'year_from_last_date'
     prcp_query = session.query(Measurement.date, Measurement.prcp).\
@@ -118,7 +128,7 @@ def stations():
     # Create dict of all station data and jsonify 
     stations_full = []
     
-    for station in station_query:
+    for id, station, name, latitude, longitude, elevation in station_query:
         stations_dict = {}
         stations_dict["id"] = id
         stations_dict["station"] = station
@@ -139,8 +149,21 @@ def tobs():
     # create session
     session = Session(engine)
     
-    # query to get dates and temperature
-    year_from_last_date = dt.datetime(2017, 8, 23) - dt.timedelta(days = 365)
+        
+    # getting latest date
+    # ordering dates by descending, selecting the first
+    last_date_recorded = session.query(Measurement.date).order_by(Measurement.date.desc()).first()
+    
+    # value stays the same; changing variable from query result to a string
+    # to split it in the next step
+    last_date_recorded = last_date_recorded[0]
+
+    # getting year, month, and day of last day recorded in the correct format
+    # for the datetime object
+    year, month, day = map(int, last_date_recorded.split("-"))
+
+    # getting one year from the last date recorded
+    year_from_last_date = dt.datetime(year, month, day) - dt.timedelta(days = 365)
 
     # query for date and tobs data for all days on and after 'year_from_last_date'
     temp_query = session.query(Measurement.date, Measurement.tobs).\
@@ -165,12 +188,14 @@ def tobs():
 
 def start_date(start):
     
+    session = Session(engine)
+    
     # calculates TMIN, TAVG, and TMAX for all dates greater than and equal to the start date provided.
     start_query = session.query(func.min(Measurement.tobs), func.avg(Measurement.tobs),func.max(Measurement.tobs)).\
                 filter(Measurement.date >= start).\
                 all()
     
-    # getting results of query in dict and jsonifying
+    # getting results of query in dictionary and jsonifying
     start_temps = []
     
     for tmin, tavg, tmax in start_query:
